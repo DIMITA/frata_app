@@ -1,12 +1,15 @@
 import { useCallback, useState } from 'react'
+import type { User } from '@supabase/supabase-js'
 
 interface DropZoneProps {
   onFile: (file: File) => void
+  user: User | null
+  onAuthClick: () => void
 }
 
 const ACCEPT = 'image/*,application/pdf,video/*'
 
-export function DropZone({ onFile }: DropZoneProps) {
+export function DropZone({ onFile, user, onAuthClick }: DropZoneProps) {
   const [dragging, setDragging] = useState(false)
 
   const handleFile = useCallback((file: File) => {
@@ -120,6 +123,19 @@ export function DropZone({ onFile }: DropZoneProps) {
           </span>
         ))}
       </div>
+
+      {/* Auth CTA */}
+      {!user && (
+        <div className="mt-6 flex items-center gap-3 text-sm text-zinc-500">
+          <span>Compte requis pour utiliser frata.</span>
+          <button
+            onClick={onAuthClick}
+            className="text-brand-400 hover:text-brand-300 font-semibold transition-colors"
+          >
+            Se connecter →
+          </button>
+        </div>
+      )}
     </div>
   )
 }

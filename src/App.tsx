@@ -3,24 +3,35 @@ import './index.css'
 import { DropZone } from './components/DropZone'
 import { MetadataPanel } from './components/MetadataPanel'
 import { EraseButton } from './components/EraseButton'
+import { AuthModal } from './components/AuthModal'
+import { CreditDisplay } from './components/CreditDisplay'
+import { PricingModal } from './components/PricingModal'
 import { readMetadata, stripMetadata, downloadBlob } from './utils/metadata'
 import type { FileMetadata } from './utils/metadata'
+import { useAuth } from './hooks/useAuth'
+import { useCredits } from './hooks/useCredits'
 
 type AppState = 'idle' | 'loading' | 'ready' | 'erasing' | 'done'
 
 export default function App() {
+  const { user, loading: authLoading, signIn, signUp, signOut } = useAuth()
+  const { credits, fetchCredits, deductCredit } = useCredits(user)
+
   const [state, setState] = useState<AppState>('idle')
   const [file, setFile] = useState<File | null>(null)
   const [metadata, setMetadata] = useState<FileMetadata | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [showAuth, setShowAuth] = useState(false)
+  const [showPricing, setShowPricing] = useState(false)
 
   const handleFile = useCallback(async (f: File) => {
+    if (!user) { setShowAuth(true); return }
+
     setFile(f)
     setError(null)
     setState('loading')
 
-    // Generate image preview
     if (f.type.startsWith('image/')) {
       const url = URL.createObjectURL(f)
       setPreview(url)
@@ -36,22 +47,38 @@ export default function App() {
       setError('Impossible de lire les métadonnées de ce fichier.')
       setState('idle')
     }
-  }, [])
+  }, [user])
 
   const handleErase = useCallback(async () => {
     if (!file) return
+
+    // Vérifier les crédits
+    if (credits === 0) {
+      setShowPricing(true)
+      return
+    }
+
     setState('erasing')
     setError(null)
 
     try {
       const cleaned = await stripMetadata(file)
+
+      // Déduire 1 crédit
+      const ok = await deductCredit()
+      if (!ok) {
+        setError('Impossible de déduire un crédit. Réessaie.')
+        setState('ready')
+        return
+      }
+
       downloadBlob(cleaned, file.name)
       setState('done')
     } catch {
       setError('Erreur lors de la suppression des métadonnées.')
       setState('ready')
     }
-  }, [file])
+  }, [file, credits, deductCredit])
 
   const handleReset = useCallback(() => {
     if (preview) URL.revokeObjectURL(preview)
@@ -62,8 +89,28 @@ export default function App() {
     setState('idle')
   }, [preview])
 
+  // Écran de chargement initial
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-surface-900 flex items-center justify-center">
+        <div className="w-8 h-8 rounded-full border-2 border-brand-500/30 border-t-brand-500 animate-spin" />
+      </div>
+    )
+  }
+
   if (state === 'idle') {
-    return <DropZone onFile={handleFile} />
+    return (
+      <>
+        <DropZone onFile={handleFile} user={user} onAuthClick={() => setShowAuth(true)} />
+        {showAuth && (
+          <AuthModal
+            onClose={() => setShowAuth(false)}
+            onLogin={signIn}
+            onSignup={signUp}
+          />
+        )}
+      </>
+    )
   }
 
   return (
@@ -90,7 +137,16 @@ export default function App() {
             <span className="text-sm font-semibold text-white">frata</span>
           </div>
 
-          <div className="w-16" />
+          {user ? (
+            <CreditDisplay
+              credits={credits}
+              onBuy={() => setShowPricing(true)}
+              onSignOut={signOut}
+              email={user.email ?? ''}
+            />
+          ) : (
+            <div className="w-16" />
+          )}
         </div>
       </header>
 
@@ -108,6 +164,24 @@ export default function App() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
             </svg>
             <p className="text-danger-300 text-sm">{error}</p>
+          </div>
+        )}
+
+        {/* Avertissement crédits faibles */}
+        {credits === 0 && state === 'ready' && (
+          <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <svg className="w-4 h-4 text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+              </svg>
+              <p className="text-amber-300 text-sm">Tu n'as plus de crédits. Recharge pour continuer.</p>
+            </div>
+            <button
+              onClick={() => setShowPricing(true)}
+              className="text-xs font-semibold text-amber-400 hover:text-amber-300 border border-amber-500/30 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0"
+            >
+              Recharger
+            </button>
           </div>
         )}
 
@@ -129,8 +203,20 @@ export default function App() {
                 onReset={handleReset}
                 erasing={state === 'erasing'}
                 done={state === 'done'}
-                disabled={state !== 'ready' && state !== 'erasing'}
+                disabled={(state !== 'ready' && state !== 'erasing') || credits === 0}
               />
+
+              {/* Credit info */}
+              {credits !== null && credits > 0 && state === 'ready' && (
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3 flex items-center gap-2">
+                  <svg className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-xs text-zinc-500">
+                    Ce fichier coûte <span className="text-zinc-400 font-medium">1 crédit</span>. Il te reste <span className="text-zinc-400 font-medium">{credits}</span>.
+                  </p>
+                </div>
+              )}
 
               {/* Info card */}
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
@@ -143,6 +229,15 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {showPricing && user && (
+        <PricingModal
+          onClose={() => setShowPricing(false)}
+          userId={user.id}
+          userEmail={user.email ?? ''}
+          onSuccess={fetchCredits}
+        />
+      )}
     </div>
   )
 }
@@ -170,7 +265,6 @@ function PrivacyScore({ metadata }: { metadata: FileMetadata }) {
         <span className="text-zinc-600 text-sm mb-1">/100</span>
       </div>
 
-      {/* Progress bar */}
       <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-700 ${bgColor}`}
