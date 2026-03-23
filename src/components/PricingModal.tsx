@@ -7,6 +7,7 @@ interface PricingModalProps {
   userId: string
   userEmail: string
   onSuccess: () => void
+  defaultPack?: CreditPack
 }
 
 const KKIAPAY_PUBLIC_KEY = import.meta.env.VITE_KKIAPAY_PUBLIC_KEY as string

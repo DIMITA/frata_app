@@ -6,24 +6,27 @@ import { EraseButton } from './components/EraseButton'
 import { AuthModal } from './components/AuthModal'
 import { CreditDisplay } from './components/CreditDisplay'
 import { PricingModal } from './components/PricingModal'
+import { LandingPage } from './components/LandingPage'
 import { readMetadata, stripMetadata, downloadBlob } from './utils/metadata'
 import type { FileMetadata } from './utils/metadata'
 import { useAuth } from './hooks/useAuth'
 import { useCredits } from './hooks/useCredits'
+import type { CreditPack } from './lib/supabase'
 
-type AppState = 'idle' | 'loading' | 'ready' | 'erasing' | 'done'
+type AppState = 'landing' | 'idle' | 'loading' | 'ready' | 'erasing' | 'done'
 
 export default function App() {
   const { user, loading: authLoading, signIn, signUp, signOut } = useAuth()
   const { credits, fetchCredits, deductCredit } = useCredits(user)
 
-  const [state, setState] = useState<AppState>('idle')
+  const [state, setState] = useState<AppState>('landing')
   const [file, setFile] = useState<File | null>(null)
   const [metadata, setMetadata] = useState<FileMetadata | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showAuth, setShowAuth] = useState(false)
   const [showPricing, setShowPricing] = useState(false)
+  const [pendingPack, setPendingPack] = useState<CreditPack | undefined>(undefined)
 
   const handleFile = useCallback(async (f: File) => {
     if (!user) { setShowAuth(true); return }
@@ -89,12 +92,49 @@ export default function App() {
     setState('idle')
   }, [preview])
 
+  const handleBuyCredits = useCallback((pack?: CreditPack) => {
+    if (!user) { setShowAuth(true); return }
+    setPendingPack(pack)
+    setShowPricing(true)
+  }, [user])
+
   // Écran de chargement initial
   if (authLoading) {
     return (
       <div className="min-h-screen bg-surface-900 flex items-center justify-center">
         <div className="w-8 h-8 rounded-full border-2 border-brand-500/30 border-t-brand-500 animate-spin" />
       </div>
+    )
+  }
+
+  if (state === 'landing') {
+    return (
+      <>
+        <LandingPage
+          user={user}
+          credits={credits}
+          onStartApp={() => setState('idle')}
+          onAuthClick={() => setShowAuth(true)}
+          onSignOut={signOut}
+          onBuyCredits={handleBuyCredits}
+        />
+        {showAuth && (
+          <AuthModal
+            onClose={() => setShowAuth(false)}
+            onLogin={async (e, p) => { await signIn(e, p); setState('idle') }}
+            onSignup={signUp}
+          />
+        )}
+        {showPricing && user && (
+          <PricingModal
+            onClose={() => setShowPricing(false)}
+            userId={user.id}
+            userEmail={user.email ?? ''}
+            onSuccess={fetchCredits}
+            defaultPack={pendingPack}
+          />
+        )}
+      </>
     )
   }
 
